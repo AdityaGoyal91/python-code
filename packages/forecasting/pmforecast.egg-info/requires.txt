@@ -1,0 +1,5 @@
+pandas
+numpy>=1.18.1
+simplejson
+configparser
+psycopg2-binary

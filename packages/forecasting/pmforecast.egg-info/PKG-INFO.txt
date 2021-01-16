@@ -1,0 +1,11 @@
+Metadata-Version: 1.0
+Name: pmforecast
+Version: 0.0.1
+Summary: UNKNOWN
+Home-page: UNKNOWN
+Author: UNKNOWN
+Author-email: UNKNOWN
+License: UNKNOWN
+Description: Forecasting Package for different metrics and picking of model that is best to use
+
+Platform: UNKNOWN
