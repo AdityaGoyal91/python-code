@@ -5,6 +5,7 @@ from pathlib import Path
 import torch
 from typing import Dict, List, Optional, Union
 from .loader import Phi4ModelLoader
+from transformers import AutoTokenizer
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')

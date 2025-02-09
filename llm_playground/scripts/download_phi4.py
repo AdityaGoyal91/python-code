@@ -13,6 +13,7 @@ sys.path.append(phi4_path)
 
 import phi4_llm
 from phi4_llm.loader import Phi4ModelLoader, get_phi4_system_info  # Updated import path
+from phi4_llm.real_estate_agent import RealEstateAgent
 
 def main():
     # Print system information
@@ -33,7 +34,7 @@ def main():
     print("\nDownloading and loading Phi-4 model...")
     try:
         model, tokenizer = loader.load_model()
-        print(f"\nPhi-4 model loaded successfully!")
+        print(f"\nPhi-4 model loaded successfully!") 
         print(f"Model size on disk: {loader.get_model_size():.2f}GB")
     except Exception as e:
         print(f"Error loading model: {e}")
