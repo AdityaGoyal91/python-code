@@ -6,6 +6,7 @@ import torch
 from typing import Dict, List, Optional, Union
 from .loader import Phi4ModelLoader
 from transformers import AutoTokenizer
+import json
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -13,113 +14,93 @@ logger = logging.getLogger(__name__)
 
 class RealEstateAgent:
     def __init__(self, cache_dir: Optional[str] = None):
-        """
-        Initialize the Real Estate Agent with Phi-4 model.
-        
-        Args:
-            cache_dir (str, optional): Custom directory to store the model
-        """
+        """Initialize the Real Estate Agent with Phi-4 model."""
         self.loader = Phi4ModelLoader(cache_dir)
         self.model = None
         self.tokenizer = None
         
-        # Define the base context for real estate analysis
-        self.base_context = """You are an experienced real estate investment analyst and buyers' agent 
-        specializing in the San Francisco Bay Area market. Your expertise includes:
-
-        1. Comparative Market Analysis (CMA):
-           - Recent sales within the last 6 months
-           - Properties within a 1-mile radius
-           - Similar square footage (±20%)
-           - Similar property characteristics
-           - Property condition and upgrades
-           - Micro-neighborhood factors
-
-        2. Market Trends Analysis:
-           - Price per square foot trends
-           - Days on market
-           - Sale price to list price ratios
-           - Seasonal market patterns
-           - Local economic indicators
-
-        3. Location Assessment:
-           - School district quality
-           - Crime rates and safety
-           - Proximity to amenities
-           - Public transportation access
-           - Future development plans
-           - Zoning changes and regulations
-
-        Provide analysis in this format:
-        1. Initial value estimate
-        2. Key factors affecting the valuation
-        3. Comparable property analysis
-        4. Market trend implications
-        5. Specific recommendations
-        """
-        
-    def load_model(self) -> None:
-        """Load the Phi-4 model and tokenizer."""
-        try:
-            self.model, self.tokenizer = self.loader.load_model()
-            logger.info("Real Estate Agent model loaded successfully")
-        except Exception as e:
-            logger.error(f"Error loading model: {e}")
-            raise
+        # Simplified base context for testing
+        self.base_context = """You are a real estate analyst. Analyze the following property and provide:
+        1. Estimated value
+        2. Key features
+        3. Comparison with similar properties
+        4. Recommendations"""
 
     def analyze_property(
         self,
         property_details: Dict[str, Union[str, float, int]],
         comps: List[Dict[str, Union[str, float, int]]],
         market_conditions: Optional[Dict[str, str]] = None,
-        max_length: int = 1024,
-        temperature: float = 0.7
+        max_length: int = 2048,  # Increased max length
+        temperature: float = 0.8  # Adjusted temperature
     ) -> str:
-        """
-        Analyze a property based on provided details and comparables.
-        
-        Args:
-            property_details: Dict containing property information
-                {
-                    "address": str,
-                    "price": float,
-                    "sqft": int,
-                    "beds": int,
-                    "baths": float,
-                    "lot_size": Optional[int],
-                    "year_built": Optional[int],
-                    "condition": Optional[str],
-                    "features": Optional[List[str]]
-                }
-            comps: List of comparable properties with similar structure
-            market_conditions: Optional dict of current market conditions
-            max_length: Maximum length of generated response
-            temperature: Temperature for text generation
-            
-        Returns:
-            str: Detailed property analysis
-        """
+        """Analyze a property based on provided details and comparables."""
         if self.model is None or self.tokenizer is None:
             self.load_model()
 
         # Format the input prompt
         prompt = self._format_analysis_prompt(property_details, comps, market_conditions)
         
-        # Generate the analysis
+        # Debug logging
+        logger.info(f"Generated prompt length: {len(prompt)}")
+        logger.info("First 100 chars of prompt: " + prompt[:100])
+        
         try:
-            inputs = self.tokenizer(prompt, return_tensors="pt").to(self.loader.device)
+            # Tokenize with padding
+            inputs = self.tokenizer(
+                prompt,
+                return_tensors="pt",
+                padding=True,
+                truncation=True,
+                max_length=max_length,
+                return_attention_mask=True
+            ).to(self.loader.device)
+            
+            logger.info(f"Input tensor shape: {inputs['input_ids'].shape}")
             
             with torch.no_grad():
                 outputs = self.model.generate(
-                    inputs["input_ids"],
+                    input_ids=inputs["input_ids"],
+                    attention_mask=inputs["attention_mask"],
                     max_length=max_length,
+                    do_sample=True,
                     temperature=temperature,
                     num_return_sequences=1,
-                    pad_token_id=self.tokenizer.eos_token_id
+                    pad_token_id=self.tokenizer.pad_token_id,
+                    eos_token_id=self.tokenizer.eos_token_id,
+                    top_k=50,
+                    top_p=0.9,
+                    repetition_penalty=1.1,
+                    length_penalty=1.0,
+                    no_repeat_ngram_size=2,
+                    min_length=100  # Ensure some minimum output
                 )
             
-            analysis = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-            return analysis.replace(prompt, "").strip()
+            logger.info(f"Output tensor shape: {outputs.shape}")
+            
+            # Decode and clean up the response
+            generated_text = self.tokenizer.decode(
+                outputs[0],
+                skip_special_tokens=True,
+                clean_up_tokenization_spaces=True
+            )
+            
+            logger.info(f"Generated text length: {len(generated_text)}")
+            
+            # Find where the prompt ends and response begins
+            prompt_end = len(prompt)
+            analysis = generated_text[prompt_end:].strip()
+            
+            logger.info(f"Analysis length: {len(analysis)}")
+            
+            if not analysis:
+                # Try alternative extraction method
+                analysis = generated_text.replace(prompt, "").strip()
+                
+            if not analysis:
+                return "Error: Model generated empty response. Please try again with different parameters."
+            
+            return analysis
             
         except Exception as e:
             logger.error(f"Error generating analysis: {e}")
@@ -133,55 +114,35 @@ class RealEstateAgent:
     ) -> str:
         """Format the input data into a prompt for the model."""
         
-        # Format property details
-        prop_str = f"""
-        Subject Property:
-        - Address: {property_details.get('address', 'N/A')}
-        - Price: ${property_details.get('price', 0):,.2f}
-        - Square Feet: {property_details.get('sqft', 0):,}
-        - Bedrooms: {property_details.get('beds', 0)}
-        - Bathrooms: {property_details.get('baths', 0)}
-        - Lot Size: {property_details.get('lot_size', 'N/A')}
-        - Year Built: {property_details.get('year_built', 'N/A')}
-        - Condition: {property_details.get('condition', 'N/A')}
-        """
-        
-        if property_details.get('features'):
-            prop_str += f"- Features: {', '.join(property_details['features'])}\n"
+        # Create a more direct prompt
+        prompt = f"""{self.base_context}
 
-        # Format comparable properties
-        comps_str = "\nComparable Properties:\n"
+            Subject Property Analysis Request:
+            Address: {property_details.get('address', 'N/A')}
+            Price: ${property_details.get('price', 0):,.2f}
+            Square Feet: {property_details.get('sqft', 0):,}
+            Bedrooms: {property_details.get('beds', 0)}
+            Bathrooms: {property_details.get('baths', 0)}
+
+            Comparable Properties:
+        """
+                
         for i, comp in enumerate(comps, 1):
-            comps_str += f"""
-            Comp {i}:
-            - Address: {comp.get('address', 'N/A')}
-            - Sale Price: ${comp.get('price', 0):,.2f}
-            - Square Feet: {comp.get('sqft', 0):,}
-            - Bedrooms: {comp.get('beds', 0)}
-            - Bathrooms: {comp.get('baths', 0)}
-            - Days on Market: {comp.get('dom', 'N/A')}
+            prompt += f"""
+                Comp {i}:
+                Address: {comp.get('address', 'N/A')}
+                Price: ${comp.get('price', 0):,.2f}
+                Square Feet: {comp.get('sqft', 0):,}
             """
 
-        # Format market conditions if provided
-        market_str = ""
         if market_conditions:
-            market_str = "\nMarket Conditions:\n"
+            prompt += "\nMarket Conditions:\n"
             for key, value in market_conditions.items():
-                market_str += f"- {key}: {value}\n"
+                prompt += f"{key}: {value}\n"
 
-        # Combine everything into final prompt
-        full_prompt = f"""{self.base_context}
-
-        Please analyze the following property:
-        {prop_str}
-        {comps_str}
-        {market_str}
-
-        Provide a detailed analysis including value estimate, key factors, comparable analysis, 
-        market trends, and specific recommendations for the buyer.
-        """
+        prompt += "\nPlease provide your analysis:"
         
-        return full_prompt
+        return prompt
 
     def update_context(self, new_context: str) -> None:
         """Update the base context for the agent."""
