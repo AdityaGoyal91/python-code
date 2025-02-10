@@ -1,9 +1,14 @@
+# Required packages:
+# pip install transformers torch accelerate
+# For 4-bit quantization also install:
+# pip install bitsandbytes
+
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch
 import warnings
 
 class Phi4Agent:
-    def __init__(self, use_4bit=False):  # Changed default to False
+    def __init__(self, use_4bit=False):
         """
         Initialize Phi-4 model and tokenizer.
         Args:
@@ -15,6 +20,10 @@ class Phi4Agent:
         
         print(f"Loading tokenizer from {self.model_name}...")
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        
+        # Ensure the tokenizer has a pad token
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
         
         print(f"Loading model from {self.model_name}...")
         try:
@@ -62,15 +71,18 @@ class Phi4Agent:
         """
         # Format the prompt
         formatted_prompt = f"Instruction: {prompt}\nResponse:"
+        print(f"Sending prompt: {formatted_prompt}")
         
-        # Tokenize
-        inputs = self.tokenizer(formatted_prompt, return_tensors="pt")
-        inputs = {k: v.to(self.model.device) for k, v in inputs.items()}
+        # Tokenize input
+        input_ids = self.tokenizer.encode(formatted_prompt, return_tensors="pt")
+        
+        # Move to correct device
+        input_ids = input_ids.to(self.model.device)
         
         # Generate
         with torch.no_grad():
             outputs = self.model.generate(
-                inputs.input_ids,
+                input_ids,
                 max_length=max_length,
                 temperature=temperature,
                 do_sample=True,
@@ -81,10 +93,16 @@ class Phi4Agent:
         
         # Decode
         full_response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+        print(f"Full response: {full_response}")
         
         # Extract just the response part
         response_start = full_response.find("Response:") + len("Response:")
-        response = full_response[response_start:].strip()
+        if response_start > len("Response:") - 1:  # If "Response:" was found
+            response = full_response[response_start:].strip()
+        else:  # If we can't find the marker, return everything after the prompt
+            response = full_response[len(formatted_prompt):].strip()
+            if not response:  # If still empty, return the full response
+                response = full_response
         
         return response
 
@@ -92,7 +110,7 @@ def main():
     """Example usage of the Phi4Agent"""
     # Initialize the agent
     print("Initializing Phi-4 agent...")
-    agent = Phi4Agent(use_4bit=False)  # Changed default to False
+    agent = Phi4Agent(use_4bit=False)
     
     # Example prompts
     prompts = [
@@ -105,8 +123,11 @@ def main():
     print("\nTesting prompts:")
     for prompt in prompts:
         print(f"\nPrompt: {prompt}")
-        response = agent.ask(prompt)
-        print(f"Response: {response}")
+        try:
+            response = agent.ask(prompt)
+            print(f"Response: {response}")
+        except Exception as e:
+            print(f"Error processing prompt: {str(e)}")
 
 if __name__ == "__main__":
     main()

@@ -18,3 +18,4 @@ scratch*
 .idea/*
 *.code-workspace
 *.tsv
+claude_docker_setup.txt
