@@ -6,3 +6,4 @@ accelerate
 safetensors
 psutil
 jupyterlab
+bitsandbytes
